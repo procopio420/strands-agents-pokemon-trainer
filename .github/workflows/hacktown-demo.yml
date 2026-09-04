@@ -2,6 +2,21 @@ name: HackTown Strands Agent Demo
 
 on:
   workflow_dispatch:
+    inputs:
+      demo:
+        description: "Escolha uma demo pronta"
+        required: true
+        default: "Clima + Pikachu (duas APIs)"
+        type: choice
+        options:
+          - "Clima + Pikachu (duas APIs)"
+          - "Charizard vs Blastoise"
+          - "Evolução do Eevee"
+          - "Prompt customizado"
+      custom_prompt:
+        description: "Prompt livre (se preencher, substitui a demo escolhida)"
+        required: false
+        type: string
   push:
     branches: [main]
     paths:
@@ -48,23 +63,57 @@ jobs:
       - name: Pull small tool-capable model
         run: docker exec ollama ollama pull qwen3:0.6b
 
+      - name: Choose demo prompt
+        env:
+          SELECTED_DEMO: ${{ inputs.demo || 'Clima + Pikachu (duas APIs)' }}
+          CUSTOM_PROMPT: ${{ inputs.custom_prompt || '' }}
+        run: |
+          if [ -n "$CUSTOM_PROMPT" ]; then
+            PROMPT="$CUSTOM_PROMPT"
+            LABEL="Prompt customizado"
+          else
+            case "$SELECTED_DEMO" in
+              "Charizard vs Blastoise")
+                PROMPT="Compare Charizard e Blastoise usando as ferramentas. Consulte os dois Pokémon e as fraquezas dos tipos relevantes. Depois diga qual você escolheria para uma batalha e por quê, usando somente dados retornados pelas ferramentas."
+                LABEL="Charizard vs Blastoise"
+                ;;
+              "Evolução do Eevee")
+                PROMPT="Consulte Eevee e sua cadeia de evolução usando as ferramentas disponíveis. Explique de forma curta as opções de evolução encontradas sem usar conhecimento próprio."
+                LABEL="Evolução do Eevee"
+                ;;
+              "Prompt customizado")
+                PROMPT="Consulte Pikachu usando as ferramentas e explique em poucas linhas seus principais stats e habilidades."
+                LABEL="Fallback do prompt customizado"
+                ;;
+              *)
+                PROMPT="Estou em Santa Rita do Sapucaí. Obrigatoriamente use buscar_clima para consultar o clima atual da cidade e buscar_pokemon para consultar Pikachu antes de responder. Depois me dê uma estratégia Pokémon curta baseada somente nos dados das ferramentas."
+                LABEL="Clima + Pikachu (duas APIs)"
+                ;;
+            esac
+          fi
+
+          echo "DEMO_LABEL=$LABEL" >> "$GITHUB_ENV"
+          {
+            echo "DEMO_PROMPT<<HACKTOWN_PROMPT"
+            echo "$PROMPT"
+            echo "HACKTOWN_PROMPT"
+          } >> "$GITHUB_ENV"
+
+          echo "🎮 Demo selecionada: $LABEL"
+          echo "📝 Prompt: $PROMPT"
+
       - name: Run HackTown agent demo
         env:
           OLLAMA_MODEL: qwen3:0.6b
           POKEMON_SESSION_ID: hacktown-actions
-          DEMO_PROMPT: >-
-            Estou em Santa Rita do Sapucaí. Obrigatoriamente use buscar_clima para consultar
-            o clima atual da cidade e buscar_pokemon para consultar Pikachu antes de responder.
-            Depois me dê uma estratégia Pokémon curta baseada somente nos dados das ferramentas.
         run: |
           python app.py 2>&1 | tee hacktown-demo.log
 
-      - name: Verify agentic tool calls
+      - name: Verify agent execution
         run: |
-          grep -q "buscar_clima" hacktown-demo.log
-          grep -q "buscar_pokemon" hacktown-demo.log
           grep -q "Demo concluída com sucesso" hacktown-demo.log
-          echo "✅ Strands agent called both Open-Meteo and PokeAPI tools successfully."
+          grep -q "Ferramenta:" hacktown-demo.log
+          echo "✅ Strands agent executed successfully and used at least one tool."
 
       - name: Publish demo summary
         if: always()
@@ -72,12 +121,18 @@ jobs:
           {
             echo "# ⚡ HackTown 2026 — Pokémon Strands Agent"
             echo
-            echo "This workflow runs the actual agent on a GitHub-hosted runner using:"
+            echo "## 🎮 Demo"
+            echo "**$DEMO_LABEL**"
+            echo
+            echo "## 📝 Prompt enviado"
+            echo "> $DEMO_PROMPT"
+            echo
+            echo "## Stack executada no GitHub Actions"
             echo "- Strands Agents"
             echo "- Ollama + qwen3:0.6b"
             echo "- PokeAPI"
             echo "- Open-Meteo"
             echo "- FileSessionManager"
             echo
-            echo "Open the **Run HackTown agent demo** step to see the agentic tool calls and answer."
+            echo "Abra o step **Run HackTown agent demo** para ver as chamadas das ferramentas e a resposta do agente."
           } >> "$GITHUB_STEP_SUMMARY"
