@@ -32,24 +32,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install "strands-agents[ollama]" requests
 
-      - name: Install Ollama
-        run: curl -fsSL https://ollama.com/install.sh | sh
-
-      - name: Start Ollama
+      - name: Start Ollama container
         run: |
-          ollama serve > /tmp/ollama.log 2>&1 &
-          for i in {1..30}; do
+          docker run -d --name ollama -p 11434:11434 ollama/ollama:latest
+          for i in {1..60}; do
             if curl -fsS http://localhost:11434/api/tags >/dev/null; then
               echo "Ollama is ready"
               exit 0
             fi
             sleep 1
           done
-          cat /tmp/ollama.log
+          docker logs ollama
           exit 1
 
       - name: Pull small tool-capable model
-        run: ollama pull qwen3:0.6b
+        run: docker exec ollama ollama pull qwen3:0.6b
 
       - name: Run HackTown agent demo
         env:
