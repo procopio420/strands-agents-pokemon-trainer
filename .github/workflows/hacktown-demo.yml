@@ -1,0 +1,87 @@
+name: HackTown Strands Agent Demo
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app.py"
+      - "tools_pokeapi.py"
+      - ".github/workflows/hacktown-demo.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  demo:
+    name: Run real Strands + Ollama agent
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "strands-agents[ollama]" requests
+
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Start Ollama
+        run: |
+          ollama serve > /tmp/ollama.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://localhost:11434/api/tags >/dev/null; then
+              echo "Ollama is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/ollama.log
+          exit 1
+
+      - name: Pull small tool-capable model
+        run: ollama pull qwen3:0.6b
+
+      - name: Run HackTown agent demo
+        env:
+          OLLAMA_MODEL: qwen3:0.6b
+          POKEMON_SESSION_ID: hacktown-actions
+          DEMO_PROMPT: >-
+            Estou em Santa Rita do Sapucaí. Obrigatoriamente use buscar_clima para consultar
+            o clima atual da cidade e buscar_pokemon para consultar Pikachu antes de responder.
+            Depois me dê uma estratégia Pokémon curta baseada somente nos dados das ferramentas.
+        run: |
+          python app.py 2>&1 | tee hacktown-demo.log
+
+      - name: Verify agentic tool calls
+        run: |
+          grep -q "buscar_clima" hacktown-demo.log
+          grep -q "buscar_pokemon" hacktown-demo.log
+          grep -q "Demo concluída com sucesso" hacktown-demo.log
+          echo "✅ Strands agent called both Open-Meteo and PokeAPI tools successfully."
+
+      - name: Publish demo summary
+        if: always()
+        run: |
+          {
+            echo "# ⚡ HackTown 2026 — Pokémon Strands Agent"
+            echo
+            echo "This workflow runs the actual agent on a GitHub-hosted runner using:"
+            echo "- Strands Agents"
+            echo "- Ollama + qwen3:0.6b"
+            echo "- PokeAPI"
+            echo "- Open-Meteo"
+            echo "- FileSessionManager"
+            echo
+            echo "Open the **Run HackTown agent demo** step to see the agentic tool calls and answer."
+          } >> "$GITHUB_STEP_SUMMARY"
